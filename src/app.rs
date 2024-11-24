@@ -20,6 +20,9 @@ pub struct App {
 
     pub brokers: Vec<KafkaBroker>,
     pub topic_list: TopicList,
+
+    pub input: String,
+    pub character_index: usize,
 }
 
 pub struct TopicList {
@@ -38,7 +41,7 @@ impl TopicList {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     #[default]
-    Running,
+    Normal,
     Input,
     Quit,
 }
@@ -59,6 +62,9 @@ impl App {
             metadata,
             brokers: Vec::new(),
             topic_list: TopicList::new(),
+
+            input: String::new(),
+            character_index: 0,
         }
     }
 
@@ -96,7 +102,7 @@ impl App {
         let buf = frame.buffer_mut();
         self.render_normal_page(area, buf);
         if self.mode == Mode::Input {
-            // self.render_input_modal(area, buf);
+            self.render_input_modal(frame);
         }
     }
 
@@ -108,7 +114,7 @@ impl App {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 if self.mode == Mode::Input {
-                    //self.handle_key_press_input(key);
+                    self.handle_key_press_input(key);
                 } else {
                     self.handle_key_press_normal(key);
                 }

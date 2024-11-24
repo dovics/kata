@@ -160,6 +160,7 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
             KeyCode::Char('r') => self.refresh_metadata().unwrap(),
+            KeyCode::Char('s') => self.mode = Mode::Input,
             _ => {}
         };
     }

@@ -1,7 +1,8 @@
 mod app;
-mod theme;
+mod input;
 mod kafka;
 mod normal;
+mod theme;
 
 use app::App;
 use color_eyre::Result;
