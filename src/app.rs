@@ -25,6 +25,7 @@ pub struct App {
     producer: BaseProducer,
     pub brokers: Vec<KafkaBroker>,
     pub topic_list: TopicList,
+    pub topic_tab: TopicTab,
 
     pub input: String,
     pub character_index: usize,
@@ -47,8 +48,17 @@ impl TopicList {
 pub enum Mode {
     #[default]
     Normal,
+    TopicInfo,
     Input,
     Quit,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum TopicTab {
+    #[default]
+    Info,
+    Messages,
+    Send,
 }
 
 impl App {
@@ -64,7 +74,7 @@ impl App {
             producer,
             brokers: Vec::new(),
             topic_list: TopicList::new(),
-
+            topic_tab: TopicTab::default(),
             input: String::new(),
             character_index: 0,
         })
@@ -95,7 +105,18 @@ impl App {
 
         self.topic_list.items.clear();
         for topic in metadata.topics() {
-            self.topic_list.items.push(KafkaTopic::from(topic));
+            let mut kafka_topic = KafkaTopic::from(topic);
+
+            for partition in &mut kafka_topic.partitions {
+                let (low, high) = self
+                    .consumer
+                    .fetch_watermarks(&kafka_topic.name, partition.id, TIMEOUT)
+                    .map_err(|e| eyre!(e))
+                    .wrap_err("Failed to fetch watermarks")?;
+                partition.low = low;
+                partition.high = high;
+            }
+            self.topic_list.items.push(kafka_topic);
         }
 
         Ok(())

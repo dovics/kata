@@ -41,6 +41,8 @@ pub struct KafkaPartition {
     pub leader: i32,
     pub replicas: Vec<i32>,
     pub isr: Vec<i32>,
+    pub low: i64,
+    pub high: i64,
 }
 
 impl From<&MetadataPartition> for KafkaPartition {
@@ -50,6 +52,8 @@ impl From<&MetadataPartition> for KafkaPartition {
             leader: partition.leader(),
             replicas: partition.replicas().to_vec(),
             isr: partition.isr().to_vec(),
+            low: 0,
+            high: 0,
         }
     }
 }

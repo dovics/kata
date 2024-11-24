@@ -13,7 +13,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Mode},
+    app::{App, Mode, TopicTab},
+    kafka::KafkaTopic,
     theme::THEME,
 };
 impl App {
@@ -124,6 +125,14 @@ impl App {
             None => return,
         };
 
+        match self.topic_tab {
+            TopicTab::Info => self.render_topic_info(area, buf, topic),
+            TopicTab::Messages => self.render_topic_messages(area, buf, topic),
+            TopicTab::Send => self.render_topic_send(area, buf, topic),
+        }
+    }
+
+    fn render_topic_info(&self, area: Rect, buf: &mut Buffer, topic: &KafkaTopic) {
         let block = Block::new()
             .title(Line::raw(format!("Topic: {}", topic.name)).centered())
             .borders(Borders::ALL)
@@ -137,11 +146,18 @@ impl App {
             .enumerate()
             .map(|(_, p)| {
                 let content = Text::from(vec![
-                    Line::from(Span::raw(format!("Partition: {}", p.id))).style(THEME.content),
-                    Line::from(Span::raw(format!("  Leader: {}", p.leader))).style(THEME.content),
-                    Line::from(Span::raw(format!("  Replicas: {:?}", p.replicas)))
+                    Line::from(Span::raw(format!(
+                        "Partition: {}    Leader: {}",
+                        p.id, p.leader
+                    )))
+                    .style(THEME.content),
+                    Line::from(Span::raw(format!(
+                        "  Replicas: {:?}  ISR: {:?}",
+                        p.replicas, p.isr
+                    )))
+                    .style(THEME.content),
+                    Line::from(Span::raw(format!("  Low: {}    High: {}", p.low, p.high)))
                         .style(THEME.content),
-                    Line::from(Span::raw(format!("  ISR: {:?}", p.isr))).style(THEME.content),
                 ]);
                 ListItem::new(content).style(THEME.borders)
             })
@@ -151,33 +167,85 @@ impl App {
 
         Widget::render(list, area, buf);
     }
+
+    fn render_topic_messages(&self, area: Rect, buf: &mut Buffer, topic: &KafkaTopic) {
+        let block = Block::new()
+            .title(Line::raw(format!("Messages for {}", topic.name)).centered())
+            .borders(Borders::ALL)
+            .border_set(symbols::border::ROUNDED)
+            .border_style(THEME.borders)
+            .padding(Padding::horizontal(1));
+
+        Widget::render(block, area, buf);
+    }
+
+    fn render_topic_send(&self, area: Rect, buf: &mut Buffer, topic: &KafkaTopic) {
+        let block = Block::new()
+            .title(Line::raw(format!("Send Message to {}", topic.name)).centered())
+            .borders(Borders::ALL)
+            .border_set(symbols::border::ROUNDED)
+            .border_style(THEME.borders)
+            .padding(Padding::horizontal(1));
+
+        Widget::render(block, area, buf);
+    }
 }
 
 impl App {
     pub fn handle_key_press_normal(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.mode = Mode::Quit,
-            KeyCode::Char('h') | KeyCode::Left => self.select_none(),
-            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
             KeyCode::Char('r') => self.refresh_metadata()?,
             KeyCode::Char('s') => self.mode = Mode::Input,
+
+            KeyCode::Char('h') | KeyCode::Left => self.select_none(),
+            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
+            KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+            KeyCode::Char('l') | KeyCode::Right => self.topic_detail(),
             _ => {}
         };
+        
         Ok(())
     }
 
     fn select_none(&mut self) {
-        self.topic_list.state.select(None);
+        match self.mode {
+            Mode::Normal => self.topic_list.state.select(None),
+            Mode::TopicInfo => self.mode = Mode::Normal,
+            _ => {}
+        }
     }
 
     fn select_next(&mut self) {
-        self.topic_list.state.select_next();
+        match self.mode {
+            Mode::Normal => self.topic_list.state.select_next(),
+            Mode::TopicInfo => match self.topic_tab {
+                TopicTab::Info => self.topic_tab = TopicTab::Messages,
+                TopicTab::Messages => self.topic_tab = TopicTab::Send,
+                TopicTab::Send => self.topic_tab = TopicTab::Info,
+            },
+            _ => {}
+        }
     }
+
     fn select_previous(&mut self) {
-        self.topic_list.state.select_previous();
+        match self.mode {
+            Mode::Normal => self.topic_list.state.select_previous(),
+            Mode::TopicInfo => match self.topic_tab {
+                TopicTab::Info => self.topic_tab = TopicTab::Send,
+                TopicTab::Messages => self.topic_tab = TopicTab::Info,
+                TopicTab::Send => self.topic_tab = TopicTab::Messages,
+            },
+            _ => {}
+        }
+    }
+
+    fn topic_detail(&mut self) {
+        if self.topic_list.state.selected().is_some() {
+            self.mode = Mode::TopicInfo;
+        }
     }
 
     fn select_first(&mut self) {
