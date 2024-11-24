@@ -1,4 +1,4 @@
-use crate::theme::THEME;
+use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
@@ -12,7 +12,10 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, Mode};
+use crate::{
+    app::{App, Mode},
+    theme::THEME,
+};
 impl App {
     pub fn render_normal_page(&mut self, area: Rect, buf: &mut Buffer) {
         let [title_bar, main_area, bottom_bar] = Layout::vertical([
@@ -151,7 +154,7 @@ impl App {
 }
 
 impl App {
-    pub fn handle_key_press_normal(&mut self, key: KeyEvent) {
+    pub fn handle_key_press_normal(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.mode = Mode::Quit,
             KeyCode::Char('h') | KeyCode::Left => self.select_none(),
@@ -159,10 +162,11 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            KeyCode::Char('r') => self.refresh_metadata().unwrap(),
+            KeyCode::Char('r') => self.refresh_metadata()?,
             KeyCode::Char('s') => self.mode = Mode::Input,
             _ => {}
         };
+        Ok(())
     }
 
     fn select_none(&mut self) {

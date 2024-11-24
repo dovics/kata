@@ -1,7 +1,4 @@
-use crate::{
-    app::{App, Mode},
-    theme::THEME,
-};
+use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
@@ -11,6 +8,11 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Clear, Paragraph, Widget},
     Frame,
+};
+
+use crate::{
+    app::{App, Mode},
+    theme::THEME,
 };
 
 impl App {
@@ -65,16 +67,17 @@ impl App {
 }
 
 impl App {
-    pub fn handle_key_press_input(&mut self, key: KeyEvent) {
+    pub fn handle_key_press_input(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Enter => self.submit_input(),
+            KeyCode::Enter => self.submit()?,
             KeyCode::Char(to_insert) => self.enter_char(to_insert),
             KeyCode::Backspace => self.delete_char(),
             KeyCode::Left => self.move_cursor_left(),
             KeyCode::Right => self.move_cursor_right(),
             _ => {}
         }
+        Ok(())
     }
 
     fn move_cursor_left(&mut self) {
@@ -123,9 +126,12 @@ impl App {
         self.character_index = 0;
     }
 
-    fn submit_input(&mut self) {
+    fn submit(&mut self) -> Result<()> {
+        self.submit_input()?;
         self.input.clear();
         self.reset_cursor();
+        self.mode = Mode::Normal;
+        Ok(())
     }
 }
 
