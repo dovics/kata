@@ -1,6 +1,8 @@
 mod app;
 mod theme;
 mod kafka;
+mod normal;
+
 use app::App;
 use color_eyre::Result;
 use crossterm::{

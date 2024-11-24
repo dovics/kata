@@ -2,7 +2,6 @@ use rdkafka::metadata::{MetadataBroker, MetadataPartition, MetadataTopic};
 
 #[derive(Debug, Clone)]
 pub struct KafkaBroker {
-    pub id: i32,
     pub host: String,
     pub port: i32,
 }
@@ -10,7 +9,6 @@ pub struct KafkaBroker {
 impl From<&MetadataBroker> for KafkaBroker {
     fn from(broker: &MetadataBroker) -> Self {
         Self {
-            id: broker.id(),
             host: broker.host().to_string(),
             port: broker.port(),
         }
