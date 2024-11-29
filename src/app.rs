@@ -1,19 +1,10 @@
-use crate::kafka::{KafkaBroker, KafkaTopic};
-use color_eyre::{
-    eyre::{eyre, Context},
-    Result,
-};
-use crossterm::event;
+use crate::{tabs::{BrokerTab, TopicTab}, theme::THEME};
+use color_eyre::{eyre::Context, Result};
+use crossterm::event::{self};
 use ratatui::{
-    crossterm::event::{Event, KeyEventKind},
-    widgets::ListState,
-    DefaultTerminal, Frame,
+    buffer::Buffer, crossterm::event::{Event, KeyEventKind}, layout::{Constraint, Layout, Rect}, style::Color, text::{Line, Span}, widgets::{Paragraph, Widget}, DefaultTerminal, Frame
 };
-use rdkafka::{
-    config::ClientConfig,
-    consumer::{BaseConsumer, Consumer},
-    producer::{BaseProducer, BaseRecord},
-};
+use rdkafka::{config::ClientConfig, consumer::BaseConsumer, producer::BaseProducer};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -23,42 +14,19 @@ pub struct App {
 
     consumer: BaseConsumer,
     producer: BaseProducer,
-    pub brokers: Vec<KafkaBroker>,
-    pub topic_list: TopicList,
-    pub topic_tab: TopicTab,
 
-    pub input: String,
-    pub character_index: usize,
-}
-
-pub struct TopicList {
-    pub items: Vec<KafkaTopic>,
-    pub state: ListState,
-}
-
-impl TopicList {
-    fn new() -> Self {
-        let items = Vec::new();
-        let state = ListState::default();
-        Self { items, state }
-    }
+    topic_tab: TopicTab,
+    broker_tab: BrokerTab,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     #[default]
-    Normal,
-    TopicInfo,
-    Input,
+    Topic,
+    Group,
+    Broker,
     Quit,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum TopicTab {
-    #[default]
-    Info,
-    Messages,
-    Send,
+    Refresh,
 }
 
 impl App {
@@ -68,62 +36,27 @@ impl App {
         let consumer = config.create().wrap_err("Consumer creation failed")?;
         let producer = config.create().wrap_err("Producer creation failed")?;
 
+        let topic_tab = TopicTab::new();
+        let broker_tab = BrokerTab::new();
         Ok(Self {
             mode: Mode::default(),
             consumer,
             producer,
-            brokers: Vec::new(),
-            topic_list: TopicList::new(),
-            topic_tab: TopicTab::default(),
-            input: String::new(),
-            character_index: 0,
+            topic_tab,
+            broker_tab,
         })
     }
 
-    pub fn submit_input(&mut self) -> Result<()> {
-        let record = BaseRecord::to(self.topic_list.items[0].name.as_str())
-            .payload(self.input.as_bytes())
-            .key("");
-
-        self.producer
-            .send(record)
-            .map_err(|(e, _)| eyre!(e))
-            .wrap_err("Failed to submit input")?;
-        Ok(())
-    }
-
-    pub fn refresh_metadata(&mut self) -> Result<()> {
-        let metadata = self
-            .consumer
-            .fetch_metadata(None, TIMEOUT)
-            .wrap_err("Failed to fetch metadata")?;
-
-        self.brokers.clear();
-        for broker in metadata.brokers() {
-            self.brokers.push(KafkaBroker::from(broker));
+    pub fn refresh_matadata(&mut self) -> Result<()> {
+        match self.mode {
+            Mode::Topic => self.topic_tab.refresh_matadata(&self.consumer),
+            Mode::Broker => self.broker_tab.refresh_matadata(&self.consumer),
+            _ => Ok(()),
         }
-
-        self.topic_list.items.clear();
-        for topic in metadata.topics() {
-            let mut kafka_topic = KafkaTopic::from(topic);
-
-            for partition in &mut kafka_topic.partitions {
-                let (low, high) = self
-                    .consumer
-                    .fetch_watermarks(&kafka_topic.name, partition.id, TIMEOUT)
-                    .map_err(|e| eyre!(e))
-                    .wrap_err("Failed to fetch watermarks")?;
-                partition.low = low;
-                partition.high = high;
-            }
-            self.topic_list.items.push(kafka_topic);
-        }
-
-        Ok(())
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        self.refresh_metadata()?;
+        self.refresh_matadata()?;
         while self.is_running() {
             terminal
                 .draw(|frame| self.draw(frame))
@@ -140,9 +73,19 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let buf = frame.buffer_mut();
-        self.render_normal_page(area, buf);
-        if self.mode == Mode::Input {
-            self.render_input_modal(frame);
+        let [title_bar, main_area, bottom_bar] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+        Self::render_title_bar(title_bar, buf);
+        Self::render_bottom_bar(bottom_bar, buf);
+
+        match self.mode {
+            Mode::Topic => self.topic_tab.render(main_area, buf),
+            Mode::Broker => self.broker_tab.render(main_area, buf),
+            _ => {}
         }
     }
 
@@ -153,14 +96,42 @@ impl App {
         }
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if self.mode == Mode::Input {
-                    self.handle_key_press_input(key)?;
-                } else {
-                    self.handle_key_press_normal(key)?;
-                }
+                self.mode = match self.mode {
+                    Mode::Topic => self.topic_tab.handle_key_press(key)?,
+                    Mode::Broker => self.broker_tab.handle_key_press(key)?,
+                    _ => self.mode,
+                };
             }
             _ => {}
         }
         Ok(())
+    }
+
+    fn render_title_bar(area: Rect, buf: &mut Buffer) {
+        Paragraph::new("Kafka TUI")
+            .style(THEME.app_title)
+            .centered()
+            .render(area, buf);
+    }
+
+    fn render_bottom_bar(area: Rect, buf: &mut Buffer) {
+        let keys = [
+            ("K/↑", "Up"),
+            ("J/↓", "Down"),
+            ("Q/Esc", "Quit"),
+            ("g/G", "First/Last"),
+        ];
+        let spans: Vec<Span> = keys
+            .iter()
+            .flat_map(|(key, desc)| {
+                let key = Span::styled(format!(" {key} "), THEME.key_binding.key);
+                let desc = Span::styled(format!(" {desc} "), THEME.key_binding.description);
+                [key, desc]
+            })
+            .collect();
+        Line::from(spans)
+            .centered()
+            .style((Color::Indexed(236), Color::Indexed(232)))
+            .render(area, buf);
     }
 }
