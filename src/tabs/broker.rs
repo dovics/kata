@@ -89,7 +89,7 @@ impl BrokerTab {
 impl BrokerTab {
     pub fn handle_key_press(&mut self, key: KeyEvent) -> Result<Mode> {
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => return Ok(Mode::Quit),
+            KeyCode::Esc | KeyCode::Char('q') => return Ok(Mode::TabChoose),
             KeyCode::Char('r') => return Ok(Mode::Refresh),
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
@@ -100,7 +100,7 @@ impl BrokerTab {
             _ => {}
         };
 
-        Ok(Mode::Broker)
+        Ok(Mode::Tab)
     }
 
     fn select_none(&mut self) {

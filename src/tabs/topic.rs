@@ -187,7 +187,7 @@ impl TopicTab {
     pub fn handle_key_press(&mut self, key: KeyEvent) -> Result<Mode> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => match self.topic_page {
-                TopicPage::Normal => return Ok(Mode::Quit),
+                TopicPage::Normal => return Ok(Mode::TabChoose),
                 _ => self.topic_page = TopicPage::Normal,
             },
             KeyCode::Char('r') => return Ok(Mode::Refresh),
@@ -201,7 +201,7 @@ impl TopicTab {
             _ => {}
         };
 
-        Ok(Mode::Topic)
+        Ok(Mode::Tab)
     }
 
     fn select_none(&mut self) {

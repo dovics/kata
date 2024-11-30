@@ -8,3 +8,4 @@ color-eyre = "0.6.3"
 crossterm = "0.28.1"
 ratatui = "0.29.0"
 rdkafka = { version = "0.25", features = ["cmake-build"] }
+strum = "0.26.3"

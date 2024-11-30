@@ -3,6 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 pub struct Theme {
     pub root: Style,
     pub app_title: Style,
+    pub tabs: Style,
     pub tabs_selected: Style,
     pub borders: Style,
     pub key_binding: KeyBinding,
@@ -21,6 +22,7 @@ pub const THEME: Theme = Theme {
         .fg(WHITE)
         .bg(DARK_BLUE)
         .add_modifier(Modifier::BOLD),
+    tabs: Style::new().fg(MID_GRAY).bg(DARK_BLUE),
     tabs_selected: Style::new()
         .fg(WHITE)
         .bg(DARK_BLUE)
@@ -43,6 +45,6 @@ const DARK_BLUE: Color = Color::Rgb(16, 24, 48);
 // const RED: Color = Color::Rgb(215, 0, 0);
 const BLACK: Color = Color::Rgb(8, 8, 8); // not really black, often #080808
 const DARK_GRAY: Color = Color::Rgb(68, 68, 68);
-//const MID_GRAY: Color = Color::Rgb(128, 128, 128);
+const MID_GRAY: Color = Color::Rgb(128, 128, 128);
 const LIGHT_GRAY: Color = Color::Rgb(188, 188, 188);
 const WHITE: Color = Color::Rgb(238, 238, 238); // not really white, often #eeeeee

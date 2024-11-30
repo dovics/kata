@@ -423,6 +423,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "rdkafka",
+ "strum",
 ]
 
 [[package]]
