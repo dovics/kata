@@ -2,6 +2,7 @@ mod broker;
 mod group;
 mod topic;
 pub use broker::BrokerTab;
+pub use group::GroupTab;
 pub use topic::TopicTab;
 
 use crate::app::{App, Mode};

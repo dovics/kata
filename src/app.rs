@@ -1,5 +1,5 @@
 use crate::{
-    tabs::{BrokerTab, Tab, TopicTab},
+    tabs::{BrokerTab, GroupTab, Tab, TopicTab},
     theme::THEME,
 };
 use color_eyre::{eyre::Context, Result};
@@ -17,16 +17,15 @@ use rdkafka::{config::ClientConfig, consumer::BaseConsumer, producer::BaseProduc
 use std::time::Duration;
 use strum::IntoEnumIterator;
 
-const TIMEOUT: Duration = Duration::from_secs(10);
-
 pub struct App {
     mode: Mode,
     pub tab: Tab,
     consumer: BaseConsumer,
     producer: BaseProducer,
 
-    topic_tab: TopicTab,
     broker_tab: BrokerTab,
+    group_tab: GroupTab,
+    topic_tab: TopicTab,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +46,7 @@ impl App {
 
         let topic_tab = TopicTab::new();
         let broker_tab = BrokerTab::new();
+        let group_tab = GroupTab::new();
         Ok(Self {
             mode: Mode::default(),
             tab: Tab::default(),
@@ -54,15 +54,25 @@ impl App {
             producer,
             topic_tab,
             broker_tab,
+            group_tab,
         })
     }
 
     pub fn refresh_matadata(&mut self) -> Result<()> {
-        match self.tab {
-            Tab::Topic => self.topic_tab.refresh_matadata(&self.consumer),
-            Tab::Group => self.broker_tab.refresh_matadata(&self.consumer),
-            _ => Ok(()),
+        let tabs = if self.mode == Mode::Tab {
+            vec![self.tab]
+        } else {
+            Tab::iter().collect()
+        };
+
+        for tab in tabs {
+            match tab {
+                Tab::Topic => self.topic_tab.refresh_matadata(&self.consumer)?,
+                Tab::Group => self.group_tab.refresh_matadata(&self.consumer)?,
+                Tab::Broker => self.broker_tab.refresh_matadata(&self.consumer)?,
+            }
         }
+        Ok(())
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
@@ -95,8 +105,8 @@ impl App {
 
         match self.tab {
             Tab::Topic => self.topic_tab.render(main_area, buf),
-            Tab::Group => self.broker_tab.render(main_area, buf),
-            _ => {}
+            Tab::Group => self.group_tab.render(main_area, buf),
+            Tab::Broker => self.broker_tab.render(main_area, buf),
         }
     }
 
@@ -111,8 +121,8 @@ impl App {
                 Mode::TabChoose => self.handle_tab_select(key)?,
                 Mode::Tab => match self.tab {
                     Tab::Topic => self.topic_tab.handle_key_press(key)?,
-                    Tab::Group => self.broker_tab.handle_key_press(key)?,
-                    _ => self.mode,
+                    Tab::Group => self.group_tab.handle_key_press(key)?,
+                    Tab::Broker => self.broker_tab.handle_key_press(key)?,
                 },
                 _ => self.mode,
             },

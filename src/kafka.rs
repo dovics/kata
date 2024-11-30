@@ -1,4 +1,7 @@
-use rdkafka::metadata::{MetadataBroker, MetadataPartition, MetadataTopic};
+use rdkafka::{
+    groups::{GroupInfo, GroupMemberInfo},
+    metadata::{MetadataBroker, MetadataPartition, MetadataTopic},
+};
 
 #[derive(Debug, Clone)]
 pub struct KafkaBroker {
@@ -54,6 +57,50 @@ impl From<&MetadataPartition> for KafkaPartition {
             isr: partition.isr().to_vec(),
             low: 0,
             high: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KafkaGroup {
+    pub name: String,
+    pub state: String,
+    pub protocol: String,
+    pub protocol_type: String,
+    pub members: Vec<KafkaGroupMember>,
+}
+
+impl From<&GroupInfo> for KafkaGroup {
+    fn from(group: &GroupInfo) -> Self {
+        let members = group
+            .members()
+            .into_iter()
+            .map(|m| KafkaGroupMember::from(m))
+            .collect();
+
+        Self {
+            name: group.name().to_string(),
+            state: group.state().to_string(),
+            protocol: group.protocol().to_string(),
+            protocol_type: group.protocol_type().to_string(),
+            members,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KafkaGroupMember {
+    pub id: String,
+    pub client_id: String,
+    pub client_host: String,
+}
+
+impl From<&GroupMemberInfo> for KafkaGroupMember {
+    fn from(member: &GroupMemberInfo) -> Self {
+        Self {
+            id: member.id().to_string(),
+            client_id: member.client_id().to_string(),
+            client_host: member.client_host().to_string(),
         }
     }
 }

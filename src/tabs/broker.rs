@@ -81,7 +81,7 @@ impl BrokerTab {
             let kafka_broker = KafkaBroker::from(broker);
             self.broker_list.items.push(kafka_broker);
         }
-
+        println!("broker list: {:?}", self.broker_list.items);
         Ok(())
     }
 }
