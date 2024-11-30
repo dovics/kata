@@ -120,7 +120,7 @@ impl App {
             Event::Key(key) if key.kind == KeyEventKind::Press => match self.mode {
                 Mode::TabChoose => self.handle_tab_select(key)?,
                 Mode::Tab => match self.tab {
-                    Tab::Topic => self.topic_tab.handle_key_press(key)?,
+                    Tab::Topic => self.topic_tab.handle_key_press(key, &self.producer)?,
                     Tab::Group => self.group_tab.handle_key_press(key)?,
                     Tab::Broker => self.broker_tab.handle_key_press(key)?,
                 },

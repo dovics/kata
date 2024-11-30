@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{app::Mode, kafka::KafkaTopic, theme::THEME};
+use crate::{app::Mode, kafka::KafkaTopic, tabs::topic_send::TopicSendForm, theme::THEME};
 use color_eyre::{
     eyre::{eyre, Context},
     Result,
@@ -11,13 +11,20 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     symbols,
     text::{Line, Span, Text},
-    widgets::ListState,
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, Padding, StatefulWidget, Widget},
+    widgets::{
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, StatefulWidget,
+        Widget,
+    },
 };
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::{
+    consumer::{BaseConsumer, Consumer},
+    producer::BaseProducer,
+};
 pub struct TopicTab {
     pub topic_list: TopicList,
     pub topic_page: TopicPage,
+
+    send_form: TopicSendForm,
 }
 
 pub struct TopicList {
@@ -40,15 +47,18 @@ pub enum TopicPage {
     Info,
     Messages,
     Send,
+    SendEdit,
 }
 
 impl TopicTab {
     pub fn new() -> Self {
         let topic_list = TopicList::new();
         let topic_page = TopicPage::default();
+        let send_form = TopicSendForm::new("");
         Self {
             topic_list,
             topic_page,
+            send_form,
         }
     }
 
@@ -95,7 +105,7 @@ impl TopicTab {
         match self.topic_page {
             TopicPage::Normal | TopicPage::Info => self.render_topic_info(area, buf, topic),
             TopicPage::Messages => self.render_topic_messages(area, buf, topic),
-            TopicPage::Send => self.render_topic_send(area, buf, topic),
+            TopicPage::Send | TopicPage::SendEdit => self.render_topic_send(area, buf),
         }
     }
 
@@ -146,15 +156,8 @@ impl TopicTab {
         Widget::render(block, area, buf);
     }
 
-    fn render_topic_send(&self, area: Rect, buf: &mut Buffer, topic: &KafkaTopic) {
-        let block = Block::new()
-            .title(Line::raw(format!("Send Message to {}", topic.name)).centered())
-            .borders(Borders::ALL)
-            .border_set(symbols::border::ROUNDED)
-            .border_style(THEME.borders)
-            .padding(Padding::horizontal(1));
-
-        Widget::render(block, area, buf);
+    fn render_topic_send(&self, area: Rect, buf: &mut Buffer) {
+        self.send_form.render(area, buf);
     }
 }
 
@@ -184,7 +187,12 @@ impl TopicTab {
 }
 
 impl TopicTab {
-    pub fn handle_key_press(&mut self, key: KeyEvent) -> Result<Mode> {
+    pub fn handle_key_press(&mut self, key: KeyEvent, producer: &BaseProducer) -> Result<Mode> {
+        if self.topic_page == TopicPage::SendEdit {
+            self.topic_page = self.send_form.handle_key_press(key, producer)?;
+            return Ok(Mode::Tab);
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => match self.topic_page {
                 TopicPage::Normal => return Ok(Mode::TabChoose),
@@ -198,6 +206,13 @@ impl TopicTab {
             KeyCode::Char('j') | KeyCode::Down => self.select_next(),
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('l') | KeyCode::Right => self.topic_detail(),
+            KeyCode::Enter => {
+                if self.topic_page == TopicPage::Send {
+                    self.topic_page = TopicPage::SendEdit;
+                } else {
+                    self.topic_detail();
+                }
+            }
             _ => {}
         };
 
@@ -217,7 +232,7 @@ impl TopicTab {
 
             TopicPage::Info => self.topic_page = TopicPage::Messages,
             TopicPage::Messages => self.topic_page = TopicPage::Send,
-            TopicPage::Send => self.topic_page = TopicPage::Info,
+            TopicPage::Send | TopicPage::SendEdit => self.topic_page = TopicPage::Info,
         }
     }
 
@@ -227,7 +242,7 @@ impl TopicTab {
 
             TopicPage::Info => self.topic_page = TopicPage::Send,
             TopicPage::Messages => self.topic_page = TopicPage::Info,
-            TopicPage::Send => self.topic_page = TopicPage::Messages,
+            TopicPage::Send | TopicPage::SendEdit => self.topic_page = TopicPage::Messages,
         }
     }
 
