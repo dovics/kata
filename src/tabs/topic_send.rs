@@ -195,7 +195,7 @@ impl TopicSendForm {
 
     pub fn submit(&mut self, producer: &BaseProducer) -> Result<()> {
         if self.message.is_empty() {
-            return Ok(());
+            return Err(eyre!("Message is empty"));
         }
 
         let topic = self.topic.clone();

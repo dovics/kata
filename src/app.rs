@@ -78,7 +78,7 @@ impl App {
 
         for tab in tabs {
             match tab {
-                Tab::Topic => self.topic_tab.refresh_matadata(&self.consumer)?,
+                Tab::Topic => self.topic_tab.refresh_matadata(&self.consumer),
                 Tab::Group => self.group_tab.refresh_matadata(&self.consumer)?,
                 Tab::Broker => self.broker_tab.refresh_matadata(&self.consumer)?,
             }
@@ -135,7 +135,8 @@ impl App {
                 Mode::Tab => match self.tab {
                     Tab::Topic => {
                         self.topic_tab
-                            .handle_key_press(key, &self.producer, &self.admin).await?
+                            .handle_key_press(key, &self.producer, &self.admin)
+                            .await?
                     }
                     Tab::Group => self.group_tab.handle_key_press(key)?,
                     Tab::Broker => self.broker_tab.handle_key_press(key)?,

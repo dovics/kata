@@ -1,10 +1,7 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::{app::Mode, kafka::KafkaTopic, tabs::topic_send::TopicSendForm, theme::THEME};
-use color_eyre::{
-    eyre::{eyre, Context},
-    Result,
-};
+use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
@@ -29,6 +26,7 @@ pub struct TopicTab {
     send_form: TopicSendForm,
 
     err: Option<String>,
+    err_time: Option<SystemTime>,
 }
 
 pub struct TopicList {
@@ -65,7 +63,18 @@ impl TopicTab {
             send_form,
 
             err: None,
+            err_time: None,
         }
+    }
+
+    fn set_error(&mut self, error: String) {
+        self.err = Some(error.clone());
+        self.err_time = Some(SystemTime::now());
+    }
+
+    fn clear_error(&mut self) {
+        self.err = None;
+        self.err_time = None;
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -166,9 +175,18 @@ impl TopicTab {
         self.send_form.render(area, buf);
     }
 
-    pub fn bottom_bar_spans(&self) -> Vec<Span> {
-        if let Some(err) = &self.err {
-            return vec![Span::raw(err)];
+    pub fn bottom_bar_spans(&mut self) -> Vec<Span> {
+        if let Some(err_time) = &self.err_time {
+            if SystemTime::now()
+                .duration_since(*err_time)
+                .unwrap()
+                .as_secs()
+                > 5
+            {
+                self.clear_error();
+            } else if let Some(err) = &self.err {
+                return vec![Span::raw(err).style(THEME.error)];
+            }
         }
 
         let keys = [
@@ -189,33 +207,39 @@ impl TopicTab {
 }
 
 impl TopicTab {
-    pub fn refresh_matadata(&mut self, consumer: &BaseConsumer) -> Result<()> {
+    pub fn refresh_matadata(&mut self, consumer: &BaseConsumer) {
         const TIMEOUT: Duration = Duration::from_secs(5);
-        let metadata = consumer
-            .fetch_metadata(None, TIMEOUT)
-            .wrap_err("Failed to fetch metadata")?;
-        self.topic_list.items.clear();
-        for topic in metadata.topics() {
-            let mut kafka_topic = KafkaTopic::from(topic);
-
-            for partition in &mut kafka_topic.partitions {
-                let (low, high) = consumer
-                    .fetch_watermarks(&kafka_topic.name, partition.id, TIMEOUT)
-                    .map_err(|e| eyre!(e))
-                    .wrap_err("Failed to fetch watermarks")?;
-                partition.low = low;
-                partition.high = high;
+        match consumer.fetch_metadata(None, TIMEOUT) {
+            Ok(metadata) => {
+                self.topic_list.items.clear();
+                for topic in metadata.topics() {
+                    let mut kafka_topic = KafkaTopic::from(topic);
+                    for partition in &mut kafka_topic.partitions {
+                        match consumer.fetch_watermarks(&kafka_topic.name, partition.id, TIMEOUT) {
+                            Ok((low, high)) => {
+                                partition.low = low;
+                                partition.high = high;
+                            }
+                            Err(e) => {
+                                self.set_error(e.to_string());
+                                return;
+                            }
+                        }
+                    }
+                    self.topic_list.items.push(kafka_topic);
+                }
             }
-            self.topic_list.items.push(kafka_topic);
-        }
-
-        Ok(())
+            Err(e) => {
+                self.set_error(e.to_string());
+                return;
+            }
+        };
     }
 
     pub async fn create_topic(&mut self, admin: &AdminClient<DefaultClientContext>) {
         let topic = NewTopic::new("test", 1, rdkafka::admin::TopicReplication::Fixed(1));
         if let Err(e) = admin.create_topics(&[topic], &AdminOptions::new()).await {
-            self.err = Some(e.to_string());
+            self.set_error(e.to_string());
         }
     }
 }
@@ -228,7 +252,13 @@ impl TopicTab {
         admin: &AdminClient<DefaultClientContext>,
     ) -> Result<Mode> {
         if self.topic_page == TopicPage::SendEdit {
-            self.topic_page = self.send_form.handle_key_press(key, producer)?;
+            self.topic_page = match self.send_form.handle_key_press(key, producer) {
+                Ok(page) => page,
+                Err(e) => {
+                    self.set_error(e.to_string());
+                    TopicPage::SendEdit
+                }
+            };
             return Ok(Mode::Tab);
         }
 
