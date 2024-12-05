@@ -42,7 +42,7 @@ impl Tab {
 }
 
 impl App {
-    pub fn handle_tab_select(&mut self, key: KeyEvent) -> Result<Mode> {
+    pub fn handle_tab_select(&mut self, key: &KeyEvent) -> Result<Mode> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return Ok(Mode::Quit),
             KeyCode::Char('j') => self.tab = self.tab.next(),

@@ -22,7 +22,6 @@ pub struct TopicSendForm {
     key: String,
 
     cursor_index: usize,
-    err: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -53,16 +52,14 @@ impl TopicSendForm {
             partition: String::new(),
 
             cursor_index: 0,
-            err: None,
         }
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
-        let [key, partition, message, err] = Layout::vertical([
+        let [key, partition, message] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Fill(1),
-            Constraint::Max(1),
         ])
         .areas(area);
 
@@ -110,26 +107,19 @@ impl TopicSendForm {
             partition,
             InputField::Partition,
         );
-
-        if let Some(err_message) = &self.err {
-            Paragraph::new(Line::from(vec![Span::raw(err_message).style(THEME.error)]))
-                .render(err, buf);
-        }
     }
 }
 
 impl TopicSendForm {
     pub fn handle_key_press(
         &mut self,
-        key: KeyEvent,
+        key: &KeyEvent,
         producer: &BaseProducer,
     ) -> Result<TopicPage> {
         match key.code {
             KeyCode::Enter => match self.field {
                 InputField::Message => {
-                    if let Err(_) = self.submit(producer) {
-                        return Ok(TopicPage::SendEdit);
-                    }
+                    self.submit(producer)?;
                     return Ok(TopicPage::Messages);
                 }
                 _ => self.change_field(),
@@ -219,13 +209,9 @@ impl TopicSendForm {
             record = record.partition(self.partition.parse().unwrap());
         }
 
-        if let Err((e, _)) = producer.send(record) {
-            self.err = Some(e.to_string());
-            return Err(eyre!(e));
-        } else {
-            self.empty();
-            Ok(())
-        }
+        producer.send(record).map_err(|(e, _)| eyre!(e))?;
+        self.empty();
+        Ok(())
     }
 
     pub fn empty(&mut self) {

@@ -3,23 +3,28 @@ use crate::{
     theme::THEME,
 };
 use color_eyre::{eyre::Context, Result};
-use crossterm::event::{self};
 use ratatui::{
     buffer::Buffer,
-    crossterm::event::{Event, KeyEventKind},
+    crossterm::event::{Event, EventStream, KeyEventKind},
     layout::{Constraint, Layout, Rect},
     style::Color,
-    text::{Line, Span},
+    text::Line,
     widgets::{Paragraph, Tabs, Widget},
     DefaultTerminal, Frame,
 };
-use rdkafka::{config::ClientConfig, consumer::BaseConsumer, producer::BaseProducer};
+
+use futures::StreamExt;
+use rdkafka::{
+    admin::AdminClient, client::DefaultClientContext, config::ClientConfig, consumer::BaseConsumer,
+    producer::BaseProducer,
+};
 use std::time::Duration;
 use strum::IntoEnumIterator;
 
 pub struct App {
     mode: Mode,
     pub tab: Tab,
+    admin: AdminClient<DefaultClientContext>,
     consumer: BaseConsumer,
     producer: BaseProducer,
 
@@ -38,11 +43,16 @@ pub enum Mode {
 }
 
 impl App {
+    const FRAMES_PER_SECOND: f32 = 60.0;
+
     pub fn new(brokers: Vec<String>) -> Result<Self> {
         let mut config = ClientConfig::new();
         let config = config.set("bootstrap.servers", &brokers.join(","));
-        let consumer = config.create().wrap_err("Consumer creation failed")?;
-        let producer = config.create().wrap_err("Producer creation failed")?;
+        let consumer: BaseConsumer = config.create().wrap_err("Consumer creation failed")?;
+        let producer: BaseProducer = config.create().wrap_err("Producer creation failed")?;
+        let admin = config
+            .create::<AdminClient<DefaultClientContext>>()
+            .wrap_err("Admin creation failed")?;
 
         let topic_tab = TopicTab::new();
         let broker_tab = BrokerTab::new();
@@ -52,6 +62,7 @@ impl App {
             tab: Tab::default(),
             consumer,
             producer,
+            admin,
             topic_tab,
             broker_tab,
             group_tab,
@@ -75,13 +86,20 @@ impl App {
         Ok(())
     }
 
-    pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+    pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         self.refresh_matadata()?;
+
+        let period = Duration::from_secs_f32(1.0 / Self::FRAMES_PER_SECOND);
+        let mut interval = tokio::time::interval(period);
+        let mut events = EventStream::new();
+
         while self.is_running() {
-            terminal
-                .draw(|frame| self.draw(frame))
-                .wrap_err("terminal.draw")?;
-            self.handle_events()?;
+            tokio::select! {
+                _ = interval.tick() => {
+                    terminal.draw(|frame| self.draw(frame))?;
+                }
+                Some(Ok(event)) = events.next() => self.handle_event(&event).await?,
+            }
         }
         Ok(())
     }
@@ -110,17 +128,15 @@ impl App {
         }
     }
 
-    fn handle_events(&mut self) -> Result<()> {
-        let timeout = Duration::from_secs_f64(1.0 / 50.0);
-        if !event::poll(timeout)? {
-            return Ok(());
-        }
-
-        self.mode = match event::read()? {
+    async fn handle_event(&mut self, event: &Event) -> Result<()> {
+        self.mode = match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => match self.mode {
                 Mode::TabChoose => self.handle_tab_select(key)?,
                 Mode::Tab => match self.tab {
-                    Tab::Topic => self.topic_tab.handle_key_press(key, &self.producer)?,
+                    Tab::Topic => {
+                        self.topic_tab
+                            .handle_key_press(key, &self.producer, &self.admin).await?
+                    }
                     Tab::Group => self.group_tab.handle_key_press(key)?,
                     Tab::Broker => self.broker_tab.handle_key_press(key)?,
                 },
@@ -155,20 +171,11 @@ impl App {
     }
 
     fn render_bottom_bar(&mut self, area: Rect, buf: &mut Buffer) {
-        let keys = [
-            ("K/↑", "Up"),
-            ("J/↓", "Down"),
-            ("Q/Esc", "Quit"),
-            ("g/G", "First/Last"),
-        ];
-        let spans: Vec<Span> = keys
-            .iter()
-            .flat_map(|(key, desc)| {
-                let key = Span::styled(format!(" {key} "), THEME.key_binding.key);
-                let desc = Span::styled(format!(" {desc} "), THEME.key_binding.description);
-                [key, desc]
-            })
-            .collect();
+        let spans = match self.tab {
+            Tab::Topic => self.topic_tab.bottom_bar_spans(),
+            _ => vec![],
+        };
+
         Line::from(spans)
             .centered()
             .style((Color::Indexed(236), Color::Indexed(232)))

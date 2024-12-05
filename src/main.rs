@@ -12,7 +12,8 @@ use crossterm::{
 use std::env;
 use std::io::stdout;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let brokers = env::args()
         .nth(1)
         .unwrap_or("localhost:9092".to_string())
@@ -23,7 +24,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
     execute!(stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
-    let app_result = App::new(brokers)?.run(terminal);
+    let app_result = App::new(brokers)?.run(terminal).await;
     execute!(stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
     ratatui::restore();
     app_result

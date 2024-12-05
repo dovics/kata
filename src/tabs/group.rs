@@ -137,7 +137,7 @@ impl GroupTab {
 }
 
 impl GroupTab {
-    pub fn handle_key_press(&mut self, key: KeyEvent) -> Result<Mode> {
+    pub fn handle_key_press(&mut self, key: &KeyEvent) -> Result<Mode> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return Ok(Mode::TabChoose),
             KeyCode::Char('r') => return Ok(Mode::Refresh),

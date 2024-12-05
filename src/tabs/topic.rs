@@ -17,6 +17,8 @@ use ratatui::{
     },
 };
 use rdkafka::{
+    admin::{AdminClient, AdminOptions, NewTopic},
+    client::DefaultClientContext,
     consumer::{BaseConsumer, Consumer},
     producer::BaseProducer,
 };
@@ -25,6 +27,8 @@ pub struct TopicTab {
     pub topic_page: TopicPage,
 
     send_form: TopicSendForm,
+
+    err: Option<String>,
 }
 
 pub struct TopicList {
@@ -59,6 +63,8 @@ impl TopicTab {
             topic_list,
             topic_page,
             send_form,
+
+            err: None,
         }
     }
 
@@ -159,6 +165,27 @@ impl TopicTab {
     fn render_topic_send(&self, area: Rect, buf: &mut Buffer) {
         self.send_form.render(area, buf);
     }
+
+    pub fn bottom_bar_spans(&self) -> Vec<Span> {
+        if let Some(err) = &self.err {
+            return vec![Span::raw(err)];
+        }
+
+        let keys = [
+            ("K/↑", "Up"),
+            ("J/↓", "Down"),
+            ("Q/Esc", "Quit"),
+            ("g/G", "First/Last"),
+        ];
+
+        keys.iter()
+            .flat_map(|(key, desc)| {
+                let key = Span::styled(format!(" {key} "), THEME.key_binding.key);
+                let desc = Span::styled(format!(" {desc} "), THEME.key_binding.description);
+                [key, desc]
+            })
+            .collect()
+    }
 }
 
 impl TopicTab {
@@ -184,10 +211,22 @@ impl TopicTab {
 
         Ok(())
     }
+
+    pub async fn create_topic(&mut self, admin: &AdminClient<DefaultClientContext>) {
+        let topic = NewTopic::new("test", 1, rdkafka::admin::TopicReplication::Fixed(1));
+        if let Err(e) = admin.create_topics(&[topic], &AdminOptions::new()).await {
+            self.err = Some(e.to_string());
+        }
+    }
 }
 
 impl TopicTab {
-    pub fn handle_key_press(&mut self, key: KeyEvent, producer: &BaseProducer) -> Result<Mode> {
+    pub async fn handle_key_press(
+        &mut self,
+        key: &KeyEvent,
+        producer: &BaseProducer,
+        admin: &AdminClient<DefaultClientContext>,
+    ) -> Result<Mode> {
         if self.topic_page == TopicPage::SendEdit {
             self.topic_page = self.send_form.handle_key_press(key, producer)?;
             return Ok(Mode::Tab);
@@ -206,6 +245,10 @@ impl TopicTab {
             KeyCode::Char('j') | KeyCode::Down => self.select_next(),
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('l') | KeyCode::Right => self.topic_detail(),
+            KeyCode::Char('n') => {
+                self.create_topic(admin).await;
+            }
+            // KeyCode::Char('d') => self.delete_topic(producer),
             KeyCode::Enter => {
                 if self.topic_page == TopicPage::Send {
                     self.topic_page = TopicPage::SendEdit;
