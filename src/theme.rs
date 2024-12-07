@@ -9,6 +9,7 @@ pub struct Theme {
     pub key_binding: KeyBinding,
     pub content: Style,
     pub error: Style,
+    pub tip: Style,
 }
 
 pub struct KeyBinding {
@@ -35,6 +36,10 @@ pub const THEME: Theme = Theme {
     },
     content: Style::new().fg(LIGHT_GRAY).bg(DARK_BLUE),
     error: Style::new().fg(RED).bg(DARK_BLUE),
+    tip: Style::new()
+        .fg(LIGHT_GRAY)
+        .bg(DARK_BLUE)
+        .add_modifier(Modifier::BOLD),
 };
 
 const DARK_BLUE: Color = Color::Rgb(16, 24, 48);

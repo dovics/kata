@@ -135,7 +135,7 @@ impl App {
                 Mode::Tab => match self.tab {
                     Tab::Topic => {
                         self.topic_tab
-                            .handle_key_press(key, &self.producer, &self.admin)
+                            .handle_key_press(key, &self.consumer, &self.producer, &self.admin)
                             .await?
                     }
                     Tab::Group => self.group_tab.handle_key_press(key)?,

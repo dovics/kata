@@ -1,29 +1,38 @@
 use std::time::{Duration, SystemTime};
 
-use crate::{app::Mode, kafka::KafkaTopic, tabs::topic_send::TopicSendForm, theme::THEME};
+use crate::{
+    app::Mode,
+    constant::POLL_TIMEOUT,
+    kafka::{KafkaMessage, KafkaTopic},
+    tabs::topic_send::TopicSendForm,
+    theme::THEME,
+};
 use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     symbols,
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, StatefulWidget,
-        Widget,
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+        StatefulWidget, Widget,
     },
 };
 use rdkafka::{
     admin::{AdminClient, AdminOptions, NewTopic},
     client::DefaultClientContext,
     consumer::{BaseConsumer, Consumer},
+    error::KafkaError,
     producer::FutureProducer,
+    types::RDKafkaErrorCode,
 };
 pub struct TopicTab {
     pub topic_list: TopicList,
     pub topic_page: TopicPage,
 
     send_form: TopicSendForm,
+    messages: Option<Vec<KafkaMessage>>,
 
     err: Option<String>,
     err_time: Option<SystemTime>,
@@ -57,10 +66,12 @@ impl TopicTab {
         let topic_list = TopicList::new();
         let topic_page = TopicPage::default();
         let send_form = TopicSendForm::new("");
+        let messages = None;
         Self {
             topic_list,
             topic_page,
             send_form,
+            messages,
 
             err: None,
             err_time: None,
@@ -168,7 +179,32 @@ impl TopicTab {
             .border_style(THEME.borders)
             .padding(Padding::horizontal(1));
 
-        Widget::render(block, area, buf);
+        let mut tip_message = "Enter to recv messages";
+        if let Some(messages) = &self.messages {
+            if messages.is_empty() {
+                tip_message = "No messages or recv failed";
+            } else {
+                let items: Vec<ListItem> = messages
+                    .iter()
+                    .map(|m| {
+                        ListItem::new(Text::from(format!("{}: {} {}", m.offset, m.key, m.payload)))
+                    })
+                    .collect();
+                let list = List::new(items).block(block);
+                Widget::render(list, area, buf);
+                return;
+            }
+        }
+
+        let text = Text::from(vec![Line::raw(tip_message)]).style(THEME.tip);
+
+        let center_area = center(
+            area,
+            Constraint::Length(text.width() as u16),
+            Constraint::Length(1),
+        );
+        block.render(area, buf);
+        Paragraph::new(text).render(center_area, buf);
     }
 
     fn render_topic_send(&mut self, area: Rect, buf: &mut Buffer) {
@@ -248,12 +284,32 @@ impl TopicTab {
             self.set_error(e.to_string());
         }
     }
+
+    pub async fn recv_messages(&mut self, consumer: &BaseConsumer) -> Vec<KafkaMessage> {
+        let mut messages = Vec::new();
+        loop {
+            match consumer.poll(POLL_TIMEOUT) {
+                Some(Ok(message)) => {
+                    messages.push(KafkaMessage::from(message));
+                }
+                Some(Err(e)) => {
+                    self.set_error(e.to_string());
+                    return messages;
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+        messages
+    }
 }
 
 impl TopicTab {
     pub async fn handle_key_press(
         &mut self,
         key: &KeyEvent,
+        consumer: &BaseConsumer,
         producer: &FutureProducer,
         admin: &AdminClient<DefaultClientContext>,
     ) -> Result<Mode> {
@@ -285,13 +341,16 @@ impl TopicTab {
                 self.create_topic(admin).await;
             }
             // KeyCode::Char('d') => self.delete_topic(producer),
-            KeyCode::Enter => {
-                if self.topic_page == TopicPage::Send {
-                    self.topic_page = TopicPage::SendEdit;
-                } else {
-                    self.topic_detail();
+            KeyCode::Enter => match self.topic_page {
+                TopicPage::Send => self.topic_page = TopicPage::SendEdit,
+                TopicPage::Messages => {
+                    let messages = self.recv_messages(consumer).await;
+                    self.messages = Some(messages);
+                    self.topic_page = TopicPage::Messages;
+                    return Ok(Mode::Tab);
                 }
-            }
+                _ => self.topic_detail(),
+            },
             _ => {}
         };
 
@@ -338,4 +397,12 @@ impl TopicTab {
     fn select_last(&mut self) {
         self.topic_list.state.select_last();
     }
+}
+
+fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
+    let [area] = Layout::horizontal([horizontal])
+        .flex(Flex::Center)
+        .areas(area);
+    let [area] = Layout::vertical([vertical]).flex(Flex::Center).areas(area);
+    area
 }
