@@ -45,9 +45,12 @@ pub enum Mode {
 impl App {
     const FRAMES_PER_SECOND: f32 = 60.0;
 
-    pub fn new(brokers: Vec<String>) -> Result<Self> {
+    pub fn new(brokers: String, group: Option<String>) -> Result<Self> {
         let mut config = ClientConfig::new();
-        let config = config.set("bootstrap.servers", &brokers.join(","));
+        let mut config = config.set("bootstrap.servers", brokers);
+        if let Some(group) = group {
+            config = config.set("group.id", group);
+        }
         let consumer: BaseConsumer = config.create().wrap_err("Consumer creation failed")?;
         let producer: FutureProducer = config.create().wrap_err("Producer creation failed")?;
         let admin = config

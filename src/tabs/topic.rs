@@ -23,9 +23,7 @@ use rdkafka::{
     admin::{AdminClient, AdminOptions, NewTopic},
     client::DefaultClientContext,
     consumer::{BaseConsumer, Consumer},
-    error::KafkaError,
     producer::FutureProducer,
-    types::RDKafkaErrorCode,
 };
 pub struct TopicTab {
     pub topic_list: TopicList,

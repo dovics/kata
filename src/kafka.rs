@@ -1,6 +1,6 @@
 use rdkafka::{
     groups::{GroupInfo, GroupMemberInfo},
-    message::{BorrowedHeaders, BorrowedMessage},
+    message::BorrowedMessage,
     metadata::{MetadataBroker, MetadataPartition, MetadataTopic},
     Message,
 };
