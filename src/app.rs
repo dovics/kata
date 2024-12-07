@@ -16,7 +16,7 @@ use ratatui::{
 use futures::StreamExt;
 use rdkafka::{
     admin::AdminClient, client::DefaultClientContext, config::ClientConfig, consumer::BaseConsumer,
-    producer::BaseProducer,
+    producer::FutureProducer,
 };
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -26,7 +26,7 @@ pub struct App {
     pub tab: Tab,
     admin: AdminClient<DefaultClientContext>,
     consumer: BaseConsumer,
-    producer: BaseProducer,
+    producer: FutureProducer,
 
     broker_tab: BrokerTab,
     group_tab: GroupTab,
@@ -49,7 +49,7 @@ impl App {
         let mut config = ClientConfig::new();
         let config = config.set("bootstrap.servers", &brokers.join(","));
         let consumer: BaseConsumer = config.create().wrap_err("Consumer creation failed")?;
-        let producer: BaseProducer = config.create().wrap_err("Producer creation failed")?;
+        let producer: FutureProducer = config.create().wrap_err("Producer creation failed")?;
         let admin = config
             .create::<AdminClient<DefaultClientContext>>()
             .wrap_err("Admin creation failed")?;

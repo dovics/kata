@@ -2,6 +2,7 @@ mod app;
 mod kafka;
 mod theme;
 mod tabs;
+mod constant;
 
 use app::App;
 use color_eyre::Result;

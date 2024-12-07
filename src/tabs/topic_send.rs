@@ -8,11 +8,11 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use rdkafka::producer::{BaseProducer, BaseRecord};
-
-use crate::theme::THEME;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 
 use super::topic::TopicPage;
+use crate::constant::SEND_TIMEOUT;
+use crate::theme::THEME;
 pub struct TopicSendForm {
     field: InputField,
     topic: String,
@@ -53,6 +53,15 @@ impl TopicSendForm {
 
             cursor_index: 0,
         }
+    }
+
+    pub fn set_topic(&mut self, topic: &str) {
+        self.topic = topic.to_string();
+        self.empty();
+    }
+
+    pub fn get_topic(&self) -> &str {
+        &self.topic
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -111,15 +120,15 @@ impl TopicSendForm {
 }
 
 impl TopicSendForm {
-    pub fn handle_key_press(
+    pub async fn handle_key_press(
         &mut self,
         key: &KeyEvent,
-        producer: &BaseProducer,
+        producer: &FutureProducer,
     ) -> Result<TopicPage> {
         match key.code {
             KeyCode::Enter => match self.field {
                 InputField::Message => {
-                    self.submit(producer)?;
+                    self.submit(producer).await?;
                     return Ok(TopicPage::Messages);
                 }
                 _ => self.change_field(),
@@ -193,23 +202,24 @@ impl TopicSendForm {
         self.move_cursor_left();
     }
 
-    pub fn submit(&mut self, producer: &BaseProducer) -> Result<()> {
-        if self.message.is_empty() {
-            return Err(eyre!("Message is empty"));
+    pub async fn submit(&mut self, producer: &FutureProducer) -> Result<()> {
+        if self.message.is_empty() || self.key.is_empty() {
+            return Err(eyre!("Message or key is empty"));
         }
 
         let topic = self.topic.clone();
-        let mut record = BaseRecord::to(&topic).payload(self.message.as_bytes());
-
-        if !self.key.is_empty() {
-            record = record.key(self.key.as_str());
-        }
+        let mut record = FutureRecord::to(&topic)
+            .payload(self.message.as_bytes())
+            .key(self.key.as_bytes());
 
         if !self.partition.is_empty() {
             record = record.partition(self.partition.parse().unwrap());
         }
 
-        producer.send(record).map_err(|(e, _)| eyre!(e))?;
+        producer
+            .send(record, SEND_TIMEOUT)
+            .await
+            .map_err(|(e, _)| eyre!(e))?;
         self.empty();
         Ok(())
     }

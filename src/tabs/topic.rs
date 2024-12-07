@@ -17,7 +17,7 @@ use rdkafka::{
     admin::{AdminClient, AdminOptions, NewTopic},
     client::DefaultClientContext,
     consumer::{BaseConsumer, Consumer},
-    producer::BaseProducer,
+    producer::FutureProducer,
 };
 pub struct TopicTab {
     pub topic_list: TopicList,
@@ -111,7 +111,7 @@ impl TopicTab {
         StatefulWidget::render(list, area, buf, &mut self.topic_list.state);
     }
 
-    fn render_selected_item(&self, area: Rect, buf: &mut Buffer) {
+    fn render_selected_item(&mut self, area: Rect, buf: &mut Buffer) {
         let topic = match self.topic_list.state.selected() {
             Some(index) => &self.topic_list.items[index],
             None => return,
@@ -171,7 +171,13 @@ impl TopicTab {
         Widget::render(block, area, buf);
     }
 
-    fn render_topic_send(&self, area: Rect, buf: &mut Buffer) {
+    fn render_topic_send(&mut self, area: Rect, buf: &mut Buffer) {
+        let current_topic = &self.topic_list.items[self.topic_list.state.selected().unwrap()].name;
+        if self.send_form.get_topic() != *current_topic {
+            self.send_form.set_topic(current_topic);
+            self.send_form.empty();
+        }
+
         self.send_form.render(area, buf);
     }
 
@@ -248,11 +254,11 @@ impl TopicTab {
     pub async fn handle_key_press(
         &mut self,
         key: &KeyEvent,
-        producer: &BaseProducer,
+        producer: &FutureProducer,
         admin: &AdminClient<DefaultClientContext>,
     ) -> Result<Mode> {
         if self.topic_page == TopicPage::SendEdit {
-            self.topic_page = match self.send_form.handle_key_press(key, producer) {
+            self.topic_page = match self.send_form.handle_key_press(key, producer).await {
                 Ok(page) => page,
                 Err(e) => {
                     self.set_error(e.to_string());
