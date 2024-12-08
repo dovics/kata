@@ -1,4 +1,7 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, SystemTime},
+};
 
 use crate::{
     app::Mode,
@@ -7,7 +10,7 @@ use crate::{
     tabs::topic_send::TopicSendForm,
     theme::THEME,
 };
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
@@ -25,15 +28,16 @@ use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     producer::FutureProducer,
 };
+
 pub struct TopicTab {
     pub topic_list: TopicList,
     pub topic_page: TopicPage,
 
     send_form: TopicSendForm,
-    messages: Option<Vec<KafkaMessage>>,
+    messages: Arc<Mutex<Vec<KafkaMessage>>>,
 
-    err: Option<String>,
-    err_time: Option<SystemTime>,
+    err: Arc<Mutex<Option<String>>>,
+    err_time: Arc<Mutex<Option<SystemTime>>>,
 }
 
 pub struct TopicList {
@@ -55,6 +59,7 @@ pub enum TopicPage {
     Normal,
     Info,
     Messages,
+    MessagesRecv,
     Send,
     SendEdit,
 }
@@ -64,26 +69,37 @@ impl TopicTab {
         let topic_list = TopicList::new();
         let topic_page = TopicPage::default();
         let send_form = TopicSendForm::new("");
-        let messages = None;
         Self {
             topic_list,
             topic_page,
             send_form,
-            messages,
+            messages: Arc::new(Mutex::new(Vec::new())),
 
-            err: None,
-            err_time: None,
+            err: Arc::new(Mutex::new(None)),
+            err_time: Arc::new(Mutex::new(None)),
         }
     }
 
     fn set_error(&mut self, error: String) {
-        self.err = Some(error.clone());
-        self.err_time = Some(SystemTime::now());
-    }
+        let mut err = self.err.lock().unwrap();
+        *err = Some(error.clone());
+        let mut err_time = self.err_time.lock().unwrap();
+        *err_time = Some(SystemTime::now());
+        drop(err);
+        drop(err_time);
 
-    fn clear_error(&mut self) {
-        self.err = None;
-        self.err_time = None;
+        let err = self.err.clone();
+        let err_time = self.err_time.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let time = err_time.lock().unwrap();
+            if let Some(t) = *time {
+                if t.elapsed().unwrap() >= Duration::from_secs(5) {
+                    let mut err = err.lock().unwrap();
+                    *err = None;
+                }
+            }
+        });
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -128,7 +144,9 @@ impl TopicTab {
 
         match self.topic_page {
             TopicPage::Normal | TopicPage::Info => self.render_topic_info(area, buf, topic),
-            TopicPage::Messages => self.render_topic_messages(area, buf, topic),
+            TopicPage::Messages | TopicPage::MessagesRecv => {
+                self.render_topic_messages(area, buf, topic)
+            }
             TopicPage::Send | TopicPage::SendEdit => self.render_topic_send(area, buf),
         }
     }
@@ -159,6 +177,13 @@ impl TopicTab {
                     .style(THEME.content),
                     Line::from(Span::raw(format!("  Low: {}    High: {}", p.low, p.high)))
                         .style(THEME.content),
+                    Line::from(Span::raw(format!(
+                        "  Lag: {}    Offset: {}",
+                        p.high - p.low,
+                        p.high
+                    )))
+                    .style(THEME.content),
+                    Line::from(""),
                 ]);
                 ListItem::new(content).style(THEME.borders)
             })
@@ -178,7 +203,8 @@ impl TopicTab {
             .padding(Padding::horizontal(1));
 
         let mut tip_message = "Enter to recv messages";
-        if let Some(messages) = &self.messages {
+        let messages = self.messages.lock().unwrap();
+        if !messages.is_empty() {
             if messages.is_empty() {
                 tip_message = "No messages or recv failed";
             } else {
@@ -190,9 +216,12 @@ impl TopicTab {
                     .collect();
                 let list = List::new(items).block(block);
                 Widget::render(list, area, buf);
+                drop(messages);
                 return;
             }
         }
+
+        drop(messages);
 
         let text = Text::from(vec![Line::raw(tip_message)]).style(THEME.tip);
 
@@ -215,19 +244,12 @@ impl TopicTab {
         self.send_form.render(area, buf);
     }
 
-    pub fn bottom_bar_spans(&mut self) -> Vec<Span> {
-        if let Some(err_time) = &self.err_time {
-            if SystemTime::now()
-                .duration_since(*err_time)
-                .unwrap()
-                .as_secs()
-                > 5
-            {
-                self.clear_error();
-            } else if let Some(err) = &self.err {
-                return vec![Span::raw(err).style(THEME.error)];
-            }
+    pub fn bottom_bar_spans(&self) -> Vec<Span> {
+        let err = self.err.lock().unwrap();
+        if let Some(err) = &*err {
+            return vec![Span::raw(err.clone()).style(THEME.error)];
         }
+        drop(err);
 
         let keys = [
             ("K/↑", "Up"),
@@ -247,8 +269,9 @@ impl TopicTab {
 }
 
 impl TopicTab {
-    pub fn refresh_matadata(&mut self, consumer: &BaseConsumer) {
+    pub async fn refresh_matadata(&mut self, consumer: Arc<Mutex<BaseConsumer>>) {
         const TIMEOUT: Duration = Duration::from_secs(5);
+        let consumer = consumer.lock().unwrap();
         match consumer.fetch_metadata(None, TIMEOUT) {
             Ok(metadata) => {
                 self.topic_list.items.clear();
@@ -274,6 +297,7 @@ impl TopicTab {
                 return;
             }
         };
+        drop(consumer);
     }
 
     pub async fn create_topic(&mut self, admin: &AdminClient<DefaultClientContext>) {
@@ -282,32 +306,13 @@ impl TopicTab {
             self.set_error(e.to_string());
         }
     }
-
-    pub async fn recv_messages(&mut self, consumer: &BaseConsumer) -> Vec<KafkaMessage> {
-        let mut messages = Vec::new();
-        loop {
-            match consumer.poll(POLL_TIMEOUT) {
-                Some(Ok(message)) => {
-                    messages.push(KafkaMessage::from(message));
-                }
-                Some(Err(e)) => {
-                    self.set_error(e.to_string());
-                    return messages;
-                }
-                None => {
-                    break;
-                }
-            }
-        }
-        messages
-    }
 }
 
 impl TopicTab {
     pub async fn handle_key_press(
         &mut self,
         key: &KeyEvent,
-        consumer: &BaseConsumer,
+        consumer: Arc<Mutex<BaseConsumer>>,
         producer: &FutureProducer,
         admin: &AdminClient<DefaultClientContext>,
     ) -> Result<Mode> {
@@ -338,13 +343,27 @@ impl TopicTab {
             KeyCode::Char('n') => {
                 self.create_topic(admin).await;
             }
+            KeyCode::Char('i') => match self.topic_page {
+                TopicPage::Send => self.topic_page = TopicPage::SendEdit,
+                _ => {}
+            },
             // KeyCode::Char('d') => self.delete_topic(producer),
             KeyCode::Enter => match self.topic_page {
                 TopicPage::Send => self.topic_page = TopicPage::SendEdit,
                 TopicPage::Messages => {
-                    let messages = self.recv_messages(consumer).await;
-                    self.messages = Some(messages);
-                    self.topic_page = TopicPage::Messages;
+                    let messages = Arc::clone(&self.messages);
+                    let consumer = Arc::clone(&consumer);
+                    let err = self.err.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = recv_messages(messages, consumer).await {
+                            let mut err = err.lock().unwrap();
+                            *err = Some(e.to_string());
+                        } else {
+                            let mut err = err.lock().unwrap();
+                            *err = Some("Recv messages finished".to_string());
+                        }
+                    });
+                    self.topic_page = TopicPage::MessagesRecv;
                     return Ok(Mode::Tab);
                 }
                 _ => self.topic_detail(),
@@ -367,7 +386,7 @@ impl TopicTab {
             TopicPage::Normal => self.topic_list.state.select_next(),
 
             TopicPage::Info => self.topic_page = TopicPage::Messages,
-            TopicPage::Messages => self.topic_page = TopicPage::Send,
+            TopicPage::Messages | TopicPage::MessagesRecv => self.topic_page = TopicPage::Send,
             TopicPage::Send | TopicPage::SendEdit => self.topic_page = TopicPage::Info,
         }
     }
@@ -377,7 +396,7 @@ impl TopicTab {
             TopicPage::Normal => self.topic_list.state.select_previous(),
 
             TopicPage::Info => self.topic_page = TopicPage::Send,
-            TopicPage::Messages => self.topic_page = TopicPage::Info,
+            TopicPage::Messages | TopicPage::MessagesRecv => self.topic_page = TopicPage::Info,
             TopicPage::Send | TopicPage::SendEdit => self.topic_page = TopicPage::Messages,
         }
     }
@@ -403,4 +422,26 @@ fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
         .areas(area);
     let [area] = Layout::vertical([vertical]).flex(Flex::Center).areas(area);
     area
+}
+
+pub async fn recv_messages(
+    messages: Arc<Mutex<Vec<KafkaMessage>>>,
+    consumer: Arc<Mutex<BaseConsumer>>,
+) -> Result<()> {
+    loop {
+        let consumer = consumer.lock().unwrap();
+        match consumer.poll(POLL_TIMEOUT) {
+            Some(Ok(message)) => {
+                let mut messages = messages.lock().unwrap();
+                messages.push(KafkaMessage::from(message));
+                drop(messages);
+            }
+            Some(Err(e)) => {
+                return Err(eyre!(e));
+            }
+            None => {
+                continue;
+            }
+        }
+    }
 }

@@ -18,14 +18,15 @@ use rdkafka::{
     admin::AdminClient, client::DefaultClientContext, config::ClientConfig, consumer::BaseConsumer,
     producer::FutureProducer,
 };
-use std::time::Duration;
+
+use std::{sync::{Arc, Mutex}, time::Duration};
 use strum::IntoEnumIterator;
 
 pub struct App {
     mode: Mode,
     pub tab: Tab,
     admin: AdminClient<DefaultClientContext>,
-    consumer: BaseConsumer,
+    consumer: Arc<Mutex<BaseConsumer>>,
     producer: FutureProducer,
 
     broker_tab: BrokerTab,
@@ -63,7 +64,7 @@ impl App {
         Ok(Self {
             mode: Mode::default(),
             tab: Tab::default(),
-            consumer,
+            consumer: Arc::new(Mutex::new(consumer)),
             producer,
             admin,
             topic_tab,
@@ -72,7 +73,7 @@ impl App {
         })
     }
 
-    pub fn refresh_matadata(&mut self) -> Result<()> {
+    pub async fn refresh_matadata(&mut self) -> Result<()> {
         let tabs = if self.mode == Mode::Tab {
             vec![self.tab]
         } else {
@@ -81,16 +82,16 @@ impl App {
 
         for tab in tabs {
             match tab {
-                Tab::Topic => self.topic_tab.refresh_matadata(&self.consumer),
-                Tab::Group => self.group_tab.refresh_matadata(&self.consumer)?,
-                Tab::Broker => self.broker_tab.refresh_matadata(&self.consumer)?,
+                Tab::Topic => self.topic_tab.refresh_matadata(self.consumer.clone()).await,
+                Tab::Group => self.group_tab.refresh_matadata(self.consumer.clone()).await?,
+                Tab::Broker => self.broker_tab.refresh_matadata(self.consumer.clone()).await?,
             }
         }
         Ok(())
     }
 
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        self.refresh_matadata()?;
+        self.refresh_matadata().await?;
 
         let period = Duration::from_secs_f32(1.0 / Self::FRAMES_PER_SECOND);
         let mut interval = tokio::time::interval(period);
@@ -138,7 +139,7 @@ impl App {
                 Mode::Tab => match self.tab {
                     Tab::Topic => {
                         self.topic_tab
-                            .handle_key_press(key, &self.consumer, &self.producer, &self.admin)
+                            .handle_key_press(key, self.consumer.clone(), &self.producer, &self.admin)
                             .await?
                     }
                     Tab::Group => self.group_tab.handle_key_press(key)?,

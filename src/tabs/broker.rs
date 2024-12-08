@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::{Arc, Mutex}, time::Duration};
 
 use crate::{app::Mode, kafka::KafkaBroker, theme::THEME};
 use color_eyre::{eyre::Context, Result};
@@ -12,6 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, HighlightSpacing, List, ListItem, Padding, StatefulWidget, Widget},
 };
 use rdkafka::consumer::{BaseConsumer, Consumer};
+
 pub struct BrokerTab {
     pub broker_list: BrokerList,
 }
@@ -70,8 +71,9 @@ impl BrokerTab {
 }
 
 impl BrokerTab {
-    pub fn refresh_matadata(&mut self, consumer: &BaseConsumer) -> Result<()> {
+    pub async fn refresh_matadata(&mut self, consumer: Arc<Mutex<BaseConsumer>>) -> Result<()> {
         const TIMEOUT: Duration = Duration::from_secs(5);
+        let consumer = consumer.lock().unwrap();
         let metadata = consumer
             .fetch_metadata(None, TIMEOUT)
             .wrap_err("Failed to fetch metadata")?;

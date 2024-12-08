@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::{Arc, Mutex}, time::Duration};
 
 use crate::{app::Mode, kafka::KafkaGroup, theme::THEME};
 use color_eyre::Result;
@@ -14,6 +14,7 @@ use ratatui::{
     },
 };
 use rdkafka::consumer::{BaseConsumer, Consumer};
+
 pub struct GroupTab {
     pub group_list: GroupList,
 }
@@ -123,8 +124,9 @@ impl GroupTab {
 }
 
 impl GroupTab {
-    pub fn refresh_matadata(&mut self, consumer: &BaseConsumer) -> Result<()> {
+    pub async fn refresh_matadata(&mut self, consumer: Arc<Mutex<BaseConsumer>>) -> Result<()> {
         const TIMEOUT: Duration = Duration::from_secs(5);
+        let consumer = consumer.lock().unwrap();
         let group_list = consumer.fetch_group_list(None, TIMEOUT)?;
         let groups = group_list.groups();
         self.group_list.items.clear();
